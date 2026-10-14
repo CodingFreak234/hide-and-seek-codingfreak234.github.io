@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grand Theft Hide & Seek - Realtime Multiplayer 3D</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js (r128) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700;800&family=Inter:wght@400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #090a0f;
+            color: #fff;
+            user-select: none;
+        }
+
+        .gta-font {
+            font-family: 'Chakra Petch', sans-serif;
+            text-transform: uppercase;
+        }
+
+        #game-canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .touch-btn {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            touch-action: manipulation;
+        }
+        .touch-btn:active {
+            background: rgba(236, 72, 153, 0.4);
+        }
+
+        /* Player Label Overlay styling */
+        .player-label {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 800;
+            text-shadow: 0px 2px 4px #000;
+            pointer-events: none;
+            white-space: nowrap;
+            background: rgba(0,0,0,0.6);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden select-none">
+
+    <!-- Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Scanline Visual Overlay -->
+    <div class="scanlines absolute inset-0 z-10 pointer-events-none"></div>
+
+    <!-- Screen World Labels Container -->
+    <div id="nametags-container" class="absolute inset-0 z-20 pointer-events-none"></div>
+
+    <!-- Aiming Crosshair -->
+    <div id="crosshair" class="crosshair z-20 flex items-center justify-center hidden">
+        <div class="w-2 h-2 bg-yellow-400 rounded-full border border-black"></div>
+        <div class="absolute w-6 h-0.5 bg-yellow-400/60"></div>
+        <div class="absolute h-6 w-0.5 bg-yellow-400/60"></div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud-overlay" class="absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-4 md:p-6 hidden">
+        
+        <!-- Top Info Header -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Game Mode & Room Status -->
+            <div class="glass-panel p-3 md:p-4 rounded-xl flex items-center gap-4 border-l-4 border-yellow-400">
+                <div class="flex flex-col">
+                    <span id="role-badge" class="gta-font text-xs font-bold text-yellow-400 tracking-wider">ROLE: UNASSIGNED</span>
+                    <span id="game-status-text" class="text-xs text-gray-300 font-medium">WAITING IN LOBBY</span>
+                </div>
+                <div class="h-8 w-px bg-gray-700"></div>
+                <div class="flex flex-col items-center">
+                    <span class="text-[10px] text-gray-400 font-bold uppercase">Time Left</span>
+                    <span id="timer-display" class="gta-font text-2xl md:text-3xl font-extrabold text-white tracking-widest">00:00</span>
+                </div>
+            </div>
+
+            <!-- Room Code & Players Scoreboard -->
+            <div class="glass-panel p-3 md:p-4 rounded-xl flex items-center gap-6 border-r-4 border-cyan-400">
+                <div class="text-right">
+                    <div class="text-[10px] text-gray-400 font-bold uppercase">Room Code</div>
+                    <div id="hud-room-code" class="gta-font text-lg font-bold text-yellow-400 tracking-widest">-----</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] text-gray-400 font-bold uppercase">Active Players</div>
+                    <div id="hiders-count" class="gta-font text-xl md:text-2xl font-bold text-cyan-400">0 Active</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Blindfold Screen for Seeker in Hiding Phase -->
+        <div id="blindfold-screen" class="absolute inset-0 bg-black/95 z-30 flex flex-col items-center justify-center text-center p-6 hidden pointer-events-auto">
+            <i class="fa-solid fa-eye-slash text-6xl text-yellow-400 mb-4 animate-bounce"></i>
+            <h2 class="gta-font text-3xl md:text-5xl font-black text-white tracking-wider mb-2">Hiders Are Disguising!</h2>
+            <p class="text-gray-400 max-w-md mb-6">Stay blindfolded while real players pick their prop disguises in the city!</p>
+            <div id="blindfold-timer" class="gta-font text-6xl text-yellow-400 font-black">20</div>
+        </div>
+
+        <!-- Notification Toast Banner -->
+        <div id="toast-container" class="self-center transform transition-all duration-300 -translate-y-4 opacity-0 pointer-events-none">
+            <div id="toast-bg" class="bg-gray-900/90 border border-yellow-500/50 px-6 py-2.5 rounded-full flex items-center gap-3 shadow-2xl shadow-yellow-500/20">
+                <i id="toast-icon" class="fa-solid fa-bell text-yellow-400"></i>
+                <span id="toast-text" class="gta-font text-sm md:text-base font-bold text-white tracking-wide">Connected to room</span>
+            </div>
+        </div>
+
+        <!-- Bottom HUD Footer -->
+        <div class="flex justify-between items-end w-full">
+            
+            <!-- GTA Style Minimap Radar -->
+            <div class="relative w-36 h-36 md:w-48 md:h-48 rounded-full border-4 border-gray-800 bg-gray-950/90 overflow-hidden shadow-2xl glass-panel">
+                <canvas id="minimap-canvas" class="w-full h-full rounded-full"></canvas>
+                <div class="absolute top-1 left-1/2 -translate-x-1/2 text-[10px] font-black text-red-500">N</div>
+                <div class="absolute inset-0 rounded-full border border-emerald-500/30 pointer-events-none"></div>
+            </div>
+
+            <!-- Health, Stamina & Ability Gauges -->
+            <div class="flex flex-col items-end gap-3 w-64 md:w-80">
+                <!-- Disguise Form Indicator -->
+                <div id="disguise-badge" class="glass-panel px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-400 flex items-center gap-2">
+                    <i class="fa-solid fa-mask"></i>
+                    <span id="disguise-text">Form: Human</span>
+                </div>
+
+                <!-- Stamina Bar -->
+                <div class="w-full glass-panel p-2 rounded-lg flex flex-col gap-1">
+                    <div class="flex justify-between text-[10px] font-bold text-gray-300 uppercase tracking-wider">
+                        <span><i class="fa-solid fa-bolt text-yellow-400 mr-1"></i> Stamina</span>
+                        <span id="stamina-percent">100%</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                        <div id="stamina-bar" class="bg-yellow-400 h-full w-full transition-all duration-75"></div>
+                    </div>
+                </div>
+
+                <!-- Seeker Radar Energy -->
+                <div id="seeker-energy-container" class="w-full glass-panel p-2 rounded-lg flex flex-col gap-1 hidden">
+                    <div class="flex justify-between text-[10px] font-bold text-gray-300 uppercase tracking-wider">
+                        <span><i class="fa-solid fa-radar text-cyan-400 mr-1"></i> Scanner Energy</span>
+                        <span id="energy-percent">100%</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
+                        <div id="energy-bar" class="bg-cyan-400 h-full w-full transition-all duration-75"></div>
+                    </div>
+                </div>
+
+                <!-- Hotkey Indicator Badges -->
+                <div class="flex gap-2">
+                    <div id="ability-e" class="glass-panel px-3 py-2 rounded-xl flex items-center gap-2 border border-white/10">
+                        <kbd class="px-1.5 py-0.5 bg-gray-800 text-yellow-400 text-xs font-bold rounded">E</kbd>
+                        <span id="ability-e-text" class="text-xs font-bold text-gray-200">Disguise</span>
+                    </div>
+                    <div id="ability-action" class="glass-panel px-3 py-2 rounded-xl flex items-center gap-2 border border-white/10">
+                        <kbd class="px-1.5 py-0.5 bg-gray-800 text-cyan-400 text-xs font-bold rounded">LMB</kbd>
+                        <span id="ability-action-text" class="text-xs font-bold text-gray-200">Taunt</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Touch HUD Overlay -->
+    <div id="mobile-controls" class="absolute inset-0 z-20 pointer-events-none hidden">
+        <div id="joystick-zone" class="absolute bottom-8 left-8 w-32 h-32 rounded-full bg-white/10 border border-white/20 pointer-events-auto flex items-center justify-center">
+            <div id="joystick-knob" class="w-12 h-12 rounded-full bg-yellow-400/80 shadow-lg pointer-events-none"></div>
+        </div>
+        <div class="absolute bottom-8 right-8 flex flex-col gap-3 pointer-events-auto items-end">
+            <div class="flex gap-3">
+                <button id="btn-crouch" class="touch-btn w-12 h-12 rounded-full font-bold text-white text-xs">CROUCH</button>
+                <button id="btn-disguise" class="touch-btn w-14 h-14 rounded-full font-bold text-yellow-400 text-xs">DISGUISE</button>
+            </div>
+            <div class="flex gap-3">
+                <button id="btn-jump" class="touch-btn w-14 h-14 rounded-full font-bold text-white text-xs">JUMP</button>
+                <button id="btn-action" class="touch-btn w-16 h-16 rounded-full font-black text-cyan-400 text-sm bg-cyan-500/20 border-cyan-400">ACTION</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lobby / Matchmaking Screen -->
+    <div id="lobby-menu" class="absolute inset-0 z-40 bg-gradient-to-br from-slate-950 via-gray-900 to-slate-900 flex flex-col items-center justify-center p-6 text-center pointer-events-auto overflow-y-auto">
+        <div class="max-w-xl w-full glass-panel p-6 md:p-8 rounded-2xl border border-yellow-500/30 shadow-2xl relative">
+            <div class="inline-block bg-yellow-400/10 border border-yellow-400/40 px-4 py-1 rounded-full text-xs font-extrabold text-yellow-400 tracking-widest uppercase mb-3">
+                Realtime Multiplayer 3D
+            </div>
+
+            <h1 class="gta-font text-3xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-amber-200 to-cyan-400 tracking-wider mb-2">
+                GRAND THEFT<br><span class="text-white">HIDE & SEEK</span>
+            </h1>
+            <p class="text-gray-400 text-xs md:text-sm mb-6">
+                Join or create a live multiplayer city room. Disguise as street props or hunt down hiders with real players!
+            </p>
+
+            <!-- Step 1: Player Name Input & Room Select -->
+            <div id="lobby-initial-step" class="flex flex-col gap-4 text-left">
+                <div>
+                    <label class="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">Player Username</label>
+                    <input id="input-username" type="text" maxlength="12" placeholder="Player1" value="Runner99" class="w-full bg-gray-900/90 border border-gray-700 focus:border-yellow-400 rounded-xl px-4 py-2.5 text-white font-semibold outline-none transition">
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 my-2">
+                    <!-- Create Room -->
+                    <div class="bg-gray-900/60 p-4 rounded-xl border border-gray-800 flex flex-col justify-between gap-3">
+                        <div>
+                            <span class="gta-font font-bold text-yellow-400 text-sm block mb-1"><i class="fa-solid fa-plus-circle mr-1"></i> Create Lobby</span>
+                            <span class="text-[11px] text-gray-400">Host a brand new multiplayer match room.</span>
+                        </div>
+                        <button id="btn-create-room" class="w-full py-2.5 bg-yellow-400 hover:bg-yellow-300 text-gray-950 font-black gta-font rounded-lg transition shadow-md">
+                            HOST ROOM
+                        </button>
+                    </div>
+
+                    <!-- Join Room -->
+                    <div class="bg-gray-900/60 p-4 rounded-xl border border-gray-800 flex flex-col justify-between gap-3">
+                        <div>
+                            <span class="gta-font font-bold text-cyan-400 text-sm block mb-1"><i class="fa-solid fa-right-to-bracket mr-1"></i> Join Lobby</span>
+                            <input id="input-room-code" type="text" placeholder="ENTER CODE (e.g. 8492)" uppercase class="w-full bg-gray-950 border border-gray-700 focus:border-cyan-400 rounded-lg px-3 py-1.5 text-xs text-white uppercase font-bold outline-none mt-1">
+                        </div>
+                        <button id="btn-join-room" class="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-gray-950 font-black gta-font rounded-lg transition shadow-md">
+                            JOIN MATCH
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Room Lobby Waiting Room -->
+            <div id="lobby-waiting-step" class="hidden flex flex-col gap-4 text-left">
+                <div class="flex justify-between items-center bg-gray-900/80 p-3.5 rounded-xl border border-yellow-500/30">
+                    <div>
+                        <span class="text-[10px] text-gray-400 uppercase font-bold block">ROOM CODE</span>
+                        <span id="lobby-code-display" class="gta-font text-2xl font-black text-yellow-400 tracking-widest">----</span>
+                    </div>
+                    <button id="btn-copy-code" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-xs font-bold text-gray-200 rounded-lg transition border border-gray-600">
+                        <i class="fa-solid fa-copy mr-1"></i> Copy Code
+                    </button>
+                </div>
+
+                <!-- Player List in Lobby -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">Joined Players (<span id="player-count-num">0</span>)</label>
+                    <div id="lobby-player-list" class="bg-gray-900/60 border border-gray-800 rounded-xl p-3 max-h-40 overflow-y-auto flex flex-col gap-2">
+                        <!-- Synced Dynamic Player Rows -->
+                    </div>
+                </div>
+
+                <!-- Role Selection -->
+                <div>
+                    <label class="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">Preferred Role</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button id="lobby-role-hider" onclick="setLobbyRole('hider')" class="p-3 rounded-xl border-2 border-yellow-400 bg-yellow-400/10 flex items-center justify-center gap-2 font-bold gta-font text-yellow-400 text-sm">
+                            <i class="fa-solid fa-user-ninja"></i> HIDER
+                        </button>
+                        <button id="lobby-role-seeker" onclick="setLobbyRole('seeker')" class="p-3 rounded-xl border-2 border-gray-800 bg-gray-900/40 flex items-center justify-center gap-2 font-bold gta-font text-gray-400 text-sm opacity-60">
+                            <i class="fa-solid fa-crosshairs"></i> SEEKER
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Host Start Button -->
+                <button id="btn-host-start" class="w-full py-3.5 bg-gradient-to-r from-yellow-400 to-amber-500 text-gray-950 font-black gta-font text-lg rounded-xl shadow-lg transition transform active:scale-95">
+                    START MULTIPLAYER MATCH <i class="fa-solid fa-play ml-2"></i>
+                </button>
+                <p id="host-only-note" class="text-[11px] text-gray-400 text-center">Waiting for the lobby host to launch the match...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Match Results Screen -->
+    <div id="game-over-modal" class="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-6 hidden pointer-events-auto">
+        <div class="max-w-md w-full glass-panel p-8 rounded-2xl border border-white/10 text-center flex flex-col items-center">
+            <div id="game-over-icon" class="w-20 h-20 rounded-full bg-yellow-400/20 text-yellow-400 flex items-center justify-center text-4xl mb-4 border border-yellow-400/40">
+                <i class="fa-solid fa-trophy"></i>
+            </div>
+            <h2 id="game-over-title" class="gta-font text-3xl md:text-4xl font-black text-white mb-2 tracking-wider">MATCH OVER</h2>
+            <p id="game-over-subtitle" class="text-gray-300 text-sm mb-6">Match completed!</p>
+
+            <button id="return-lobby-btn" class="w-full py-3.5 bg-yellow-400 hover:bg-yellow-300 text-gray-950 font-black gta-font text-lg rounded-xl shadow-lg transition-all">
+                RETURN TO LOBBY <i class="fa-solid fa-rotate-right ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- FIREBASE MODULE IMPORTS -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        /* -------------------------------------------------------------------------- */
+        /*  FIREBASE SETUP & GLOBAL MULTIPLAYER VARS                                 */
+        /* -------------------------------------------------------------------------- */
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'gta-hide-seek-mp';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "demo-key",
+            authDomain: "demo.firebaseapp.com",
+            projectId: "demo-project",
+            storageBucket: "demo.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:demo"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let currentUser = null;
+        let currentRoomCode = null;
+        let isHost = false;
+        let preferredRole = 'hider';
+        let myUsername = 'Player1';
+
+        let roomUnsubscribe = null;
+        let playersUnsubscribe = null;
+
+        // Remote Player Visual Entities
+        const remotePlayers = {}; // { [uid]: { mesh, labelEl, data } }
+
+        /* -------------------------------------------------------------------------- */
+        /*  AUDIO SYNTHESIZER (Web Audio API)                                        */
+        /* -------------------------------------------------------------------------- */
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+            }
+
+            playFootstep() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+
+            playTauntHorn() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(320, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(480, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.5);
+            }
+
+            playDisguiseSound() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+
+            playTagRay() {
+                if (!this.enabled || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(900, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            playCatchSuccess() {
+                if (!this.enabled || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                [400, 600, 900].forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+                    gain.gain.setValueAtTime(0.2, now + idx * 0.1);
+                    gain.gain.linearRampToValueAtTime(0.01, now + (idx + 1) * 0.1);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.1);
+                    osc.stop(now + (idx + 1) * 0.1);
+                });
+            }
+        }
+
+        const audio = new SoundFX();
+
+        /* -------------------------------------------------------------------------- */
+        /*  THREE.JS WORLD & GAME ENGINE CONSTANTS                                   */
+        /* -------------------------------------------------------------------------- */
+        const CITY_SIZE = 180;
+        const PROP_TYPES = ['dumpster', 'crate', 'bush', 'vending'];
+
+        let scene, camera, renderer, clock;
+        let player, cameraPivot;
+        let dirLight, ambientLight;
+
+        let gameState = 'LOBBY'; // LOBBY, HIDING_PHASE, SEEKING_PHASE, GAMEOVER
+        let myRole = 'hider';
+        let isCaught = false;
+        let playerDisguise = null; // null or prop type string
+
+        let playerStamina = 100;
+        let scannerEnergy = 100;
+        let lastSyncTime = 0;
+
+        let transformableProps = [];
+        let cityBuildings = [];
+
+        const keys = { w: false, a: false, s: false, d: false, space: false, shift: false, crouch: false };
+        let mouseLook = { yaw: 0, pitch: 0 };
+        let isPointerLocked = false;
+
+        let minimapCtx;
+
+        /* -------------------------------------------------------------------------- */
+        /*  AUTHENTICATION & FIREBASE SYNC HELPERS                                   */
+        /* -------------------------------------------------------------------------- */
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth initialization failed:", err);
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+            }
+        });
+
+        // Path Generators adhering strictly to MANDATORY RULE 1
+        function getRoomDocRef(roomCode) {
+            return doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode);
+        }
+
+        function getPlayerDocRef(roomCode, uid) {
+            return doc(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'players', uid);
+        }
+
+        function getPlayersCollectionRef(roomCode) {
+            return collection(db, 'artifacts', appId, 'public', 'data', 'rooms', roomCode, 'players');
+        }
+
+        /* -------------------------------------------------------------------------- */
+        /*  LOBBY & MULTIPLAYER MATCHMAKING                                          */
+        /* -------------------------------------------------------------------------- */
+        async function createRoom() {
+            if (!currentUser) return;
+            myUsername = document.getElementById('input-username').value.trim() || 'Player1';
+            const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+            const roomRef = getRoomDocRef(roomCode);
+            const playerRef = getPlayerDocRef(roomCode, currentUser.uid);
+
+            try {
+                await setDoc(roomRef, {
+                    code: roomCode,
+                    hostUid: currentUser.uid,
+                    state: 'LOBBY',
+                    hidingTimer: 20,
+                    seekingTimer: 120,
+                    createdAt: Date.now()
+                });
+
+                await setDoc(playerRef, {
+                    uid: currentUser.uid,
+                    name: myUsername,
+                    role: preferredRole,
+                    isHost: true,
+                    isCaught: false,
+                    disguise: null,
+                    x: 0, y: 0, z: 0,
+                    rotationY: 0
+                });
+
+                isHost = true;
+                currentRoomCode = roomCode;
+                subscribeToRoom(roomCode);
+                showLobbyWaitingStep(roomCode);
+                showToast(`Room ${roomCode} created!`, "fa-check");
+            } catch (e) {
+                console.error("Error creating room:", e);
+                showToast("Failed to create room!", "fa-triangle-exclamation");
+            }
+        }
+
+        async function joinRoom() {
+            if (!currentUser) return;
+            myUsername = document.getElementById('input-username').value.trim() || 'Player1';
+            const code = document.getElementById('input-room-code').value.trim().toUpperCase();
+
+            if (!code) {
+                showToast("Please enter a Room Code!", "fa-triangle-exclamation");
+                return;
+            }
+
+            const roomRef = getRoomDocRef(code);
+            const snap = await getDoc(roomRef);
+
+            if (!snap.exists()) {
+                showToast("Room not found!", "fa-triangle-exclamation");
+                return;
+            }
+
+            const playerRef = getPlayerDocRef(code, currentUser.uid);
+            await setDoc(playerRef, {
+                uid: currentUser.uid,
+                name: myUsername,
+                role: preferredRole,
+                isHost: false,
+                isCaught: false,
+                disguise: null,
+                x: (Math.random() - 0.5) * 20, y: 0, z: (Math.random() - 0.5) * 20,
+                rotationY: 0
+            });
+
+            isHost = false;
+            currentRoomCode = code;
+            subscribeToRoom(code);
+            showLobbyWaitingStep(code);
+            showToast(`Joined Room ${code}!`, "fa-check");
+        }
+
+        function showLobbyWaitingStep(code) {
+            document.getElementById('lobby-initial-step').classList.add('hidden');
+            document.getElementById('lobby-waiting-step').classList.remove('hidden');
+            document.getElementById('lobby-code-display').innerText = code;
+            document.getElementById('hud-room-code').innerText = code;
+
+            if (isHost) {
+                document.getElementById('btn-host-start').classList.remove('hidden');
+                document.getElementById('host-only-note').classList.add('hidden');
+            } else {
+                document.getElementById('btn-host-start').classList.add('hidden');
+                document.getElementById('host-only-note').classList.remove('hidden');
+            }
+        }
+
+        function subscribeToRoom(roomCode) {
+            // Unsub previous
+            if (roomUnsubscribe) roomUnsubscribe();
+            if (playersUnsubscribe) playersUnsubscribe();
+
+            // 1) Listen to Room State updates
+            roomUnsubscribe = onSnapshot(getRoomDocRef(roomCode), (docSnap) => {
+                if (!docSnap.exists()) return;
+                const roomData = docSnap.data();
+
+                handleRoomStateChange(roomData);
+            }, (err) => console.error("Room listener error:", err));
+
+            // 2) Listen to Players collection (RULE 2: Simple query only)
+            playersUnsubscribe = onSnapshot(getPlayersCollectionRef(roomCode), (snapshot) => {
+                const playersList = [];
+                snapshot.forEach(pDoc => {
+                    const pData = pDoc.data();
+                    playersList.push(pData);
+                    
+                    if (pData.uid !== currentUser.uid) {
+                        updateRemotePlayerMesh(pData);
+                    } else {
+                        myRole = pData.role;
+                        isCaught = pData.isCaught;
+                    }
+                });
+
+                updateLobbyPlayersUI(playersList);
+            }, (err) => console.error("Players listener error:", err));
+        }
+
+        function handleRoomStateChange(roomData) {
+            const prevState = gameState;
+            gameState = roomData.state;
+
+            document.getElementById('game-status-text').innerText = gameState.replace('_', ' ');
+
+            if (gameState === 'HIDING_PHASE' || gameState === 'SEEKING_PHASE') {
+                document.getElementById('lobby-menu').classList.add('hidden');
+                document.getElementById('hud-overlay').classList.remove('hidden');
+                document.getElementById('crosshair').classList.remove('hidden');
+
+                document.getElementById('role-badge').innerText = `ROLE: ${myRole.toUpperCase()}`;
+                document.getElementById('role-badge').className = `gta-font text-xs font-bold tracking-wider ${myRole === 'hider' ? 'text-yellow-400' : 'text-cyan-400'}`;
+
+                if (myRole === 'seeker') {
+                    document.getElementById('seeker-energy-container').classList.remove('hidden');
+                    document.getElementById('ability-e-text').innerText = 'Scan Radar';
+                    document.getElementById('ability-action-text').innerText = 'Tag Ray';
+                    if (gameState === 'HIDING_PHASE') {
+                        document.getElementById('blindfold-screen').classList.remove('hidden');
+                    } else {
+                        document.getElementById('blindfold-screen').classList.add('hidden');
+                    }
+                } else {
+                    document.getElementById('blindfold-screen').classList.add('hidden');
+                    document.getElementById('seeker-energy-container').classList.add('hidden');
+                    document.getElementById('ability-e-text').innerText = 'Disguise';
+                    document.getElementById('ability-action-text').innerText = 'Taunt Horn';
+                }
+
+                // Update Timer Displays
+                const timeLeft = gameState === 'HIDING_PHASE' ? roomData.hidingTimer : roomData.seekingTimer;
+                const mins = Math.floor(timeLeft / 60);
+                const secs = Math.floor(timeLeft % 60);
+                document.getElementById('timer-display').innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                document.getElementById('blindfold-timer').innerText = secs;
+            } else if (gameState === 'GAMEOVER') {
+                document.getElementById('game-over-modal').classList.remove('hidden');
+                document.exitPointerLock();
+            }
+        }
+
+        function updateLobbyPlayersUI(playersList) {
+            const container = document.getElementById('lobby-player-list');
+            container.innerHTML = '';
+            document.getElementById('player-count-num').innerText = playersList.length;
+            document.getElementById('hiders-count').innerText = `${playersList.length} Players`;
+
+            playersList.forEach(p => {
+                const row = document.createElement('div');
+                row.className = 'flex justify-between items-center text-xs p-2 bg-gray-800/50 rounded-lg border border-gray-700/50';
+                row.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid ${p.role === 'hider' ? 'fa-user-ninja text-yellow-400' : 'fa-crosshairs text-cyan-400'}"></i>
+                        <span class="font-bold text-white">${p.name} ${p.uid === currentUser.uid ? '(You)' : ''}</span>
+                    </div>
+                    <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${p.role === 'hider' ? 'bg-yellow-400/20 text-yellow-400' : 'bg-cyan-400/20 text-cyan-400'}">${p.role}</span>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        window.setLobbyRole = async function(role) {
+            preferredRole = role;
+            document.getElementById('lobby-role-hider').className = role === 'hider' ? 
+                "p-3 rounded-xl border-2 border-yellow-400 bg-yellow-400/10 flex items-center justify-center gap-2 font-bold gta-font text-yellow-400 text-sm" :
+                "p-3 rounded-xl border-2 border-gray-800 bg-gray-900/40 flex items-center justify-center gap-2 font-bold gta-font text-gray-400 text-sm opacity-60";
+
+            document.getElementById('lobby-role-seeker').className = role === 'seeker' ? 
+                "p-3 rounded-xl border-2 border-cyan-400 bg-cyan-400/10 flex items-center justify-center gap-2 font-bold gta-font text-cyan-400 text-sm" :
+                "p-3 rounded-xl border-2 border-gray-800 bg-gray-900/40 flex items-center justify-center gap-2 font-bold gta-font text-gray-400 text-sm opacity-60";
+
+            if (currentRoomCode && currentUser) {
+                await updateDoc(getPlayerDocRef(currentRoomCode, currentUser.uid), { role: preferredRole });
+            }
+        };
+
+        async function startMatchAsHost() {
+            if (!isHost || !currentRoomCode) return;
+
+            await updateDoc(getRoomDocRef(currentRoomCode), {
+                state: 'HIDING_PHASE',
+                hidingTimer: 20,
+                seekingTimer: 120
+            });
+
+            // Start room clock countdown loop on host
+            runHostTimerLoop();
+        }
+
+        function runHostTimerLoop() {
+            let hTimer = 20;
+            let sTimer = 120;
+
+            const interval = setInterval(async () => {
+                if (!currentRoomCode || !isHost) {
+                    clearInterval(interval);
+                    return;
+                }
+
+                if (gameState === 'HIDING_PHASE') {
+                    hTimer--;
+                    await updateDoc(getRoomDocRef(currentRoomCode), { hidingTimer: hTimer });
+                    if (hTimer <= 0) {
+                        gameState = 'SEEKING_PHASE';
+                        await updateDoc(getRoomDocRef(currentRoomCode), { state: 'SEEKING_PHASE' });
+                    }
+                } else if (gameState === 'SEEKING_PHASE') {
+                    sTimer--;
+                    await updateDoc(getRoomDocRef(currentRoomCode), { seekingTimer: sTimer });
+                    if (sTimer <= 0) {
+                        clearInterval(interval);
+                        await updateDoc(getRoomDocRef(currentRoomCode), { state: 'GAMEOVER' });
+                    }
+                }
+            }, 1000);
+        }
+
+        async function syncMyPositionToFirebase() {
+            if (!currentRoomCode || !currentUser || gameState === 'LOBBY') return;
+            const now = Date.now();
+            if (now - lastSyncTime < 80) return; // 12 FPS throttled sync for smoothness
+            lastSyncTime = now;
+
+            try {
+                await updateDoc(getPlayerDocRef(currentRoomCode, currentUser.uid), {
+                    x: player.position.x,
+                    y: player.position.y,
+                    z: player.position.z,
+                    rotationY: player.rotation.y,
+                    disguise: playerDisguise
+                });
+            } catch (err) {
+                console.error("Position sync error:", err);
+            }
+        }
+
+        /* -------------------------------------------------------------------------- */
+        /*  THREE.JS SCENE SETUP & ENGINE                                            */
+        /* -------------------------------------------------------------------------- */
+        function initThreeJS() {
+            const canvas = document.getElementById('game-canvas');
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.FogExp2(0x87ceeb, 0.008);
+
+            clock = new THREE.Clock();
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 500);
+            cameraPivot = new THREE.Object3D();
+            scene.add(cameraPivot);
+            cameraPivot.add(camera);
+            camera.position.set(0, 3, 7);
+            camera.lookAt(0, 1.2, 0);
+
+            // Lighting
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+            dirLight.position.set(80, 120, 60);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            // Local Player Mesh Container
+            player = new THREE.Group();
+            scene.add(player);
+            createHumanCharacterMesh(player, 0x2563eb);
+
+            buildCityEnvironment();
+            initMinimap();
+            setupEventListeners();
+        }
+
+        function createHumanCharacterMesh(parentGroup, shirtColor = 0x2563eb) {
+            const matBody = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.5 });
+            const matSkin = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+            const matPants = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+
+            // Torso
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.1, 0.5), matBody);
+            torso.position.y = 1.25;
+            torso.castShadow = true;
+            parentGroup.add(torso);
+
+            // Head
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), matSkin);
+            head.position.y = 2.1;
+            head.castShadow = true;
+            parentGroup.add(head);
+
+            // Legs
+            const legLeft = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.9, 0.35), matPants);
+            legLeft.position.set(-0.2, 0.45, 0);
+            legLeft.castShadow = true;
+            parentGroup.add(legLeft);
+
+            const legRight = legLeft.clone();
+            legRight.position.x = 0.2;
+            parentGroup.add(legRight);
+        }
+
+        function buildCityEnvironment() {
+            // Ground Plane
+            const groundGeo = new THREE.PlaneGeometry(CITY_SIZE * 2, CITY_SIZE * 2);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.8 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            const gridCells = 5;
+            const step = (CITY_SIZE * 1.5) / gridCells;
+            const offset = -(CITY_SIZE * 0.75);
+
+            for (let i = 0; i < gridCells; i++) {
+                for (let j = 0; j < gridCells; j++) {
+                    const x = offset + i * step + step / 2;
+                    const z = offset + j * step + step / 2;
+                    createCityBlock(x, z, step * 0.75);
+                }
+            }
+        }
+
+        function createCityBlock(bx, bz, size) {
+            const sidewalkGeo = new THREE.BoxGeometry(size, 0.4, size);
+            const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.6 });
+            const sidewalk = new THREE.Mesh(sidewalkGeo, sidewalkMat);
+            sidewalk.position.set(bx, 0.2, bz);
+            scene.add(sidewalk);
+
+            const height = 15 + Math.random() * 30;
+            const bGeo = new THREE.BoxGeometry(size - 3, height, size - 3);
+            const bMat = new THREE.MeshStandardMaterial({ color: 0x3d4f59, roughness: 0.4 });
+            const building = new THREE.Mesh(bGeo, bMat);
+            building.position.set(bx, height / 2 + 0.4, bz);
+            building.castShadow = true;
+            scene.add(building);
+
+            cityBuildings.push({
+                minX: bx - (size-3)/2, maxX: bx + (size-3)/2,
+                minZ: bz - (size-3)/2, maxZ: bz + (size-3)/2
+            });
+
+            // Add Disguise Props around sidewalk
+            if (Math.random() > 0.3) {
+                const propType = PROP_TYPES[Math.floor(Math.random() * PROP_TYPES.length)];
+                spawnInteractiveProp(propType, bx + (size/2 - 1), bz + (size/2 - 1));
+            }
+        }
+
+        function spawnInteractiveProp(type, x, z) {
+            let propMesh;
+            if (type === 'dumpster') {
+                propMesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 1.4), new THREE.MeshStandardMaterial({ color: 0x1f4e38 }));
+            } else if (type === 'crate') {
+                propMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
+            } else if (type === 'bush') {
+                propMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(1.0), new THREE.MeshStandardMaterial({ color: 0x1e6b33 }));
+            } else if (type === 'vending') {
+                propMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 1.0), new THREE.MeshStandardMaterial({ color: 0xd92b2b }));
+            }
+
+            propMesh.position.set(x, getPropYOffset(type), z);
+            propMesh.castShadow = true;
+            scene.add(propMesh);
+
+            transformableProps.push({ mesh: propMesh, type, x, z });
+        }
+
+        function getPropYOffset(type) {
+            switch(type) {
+                case 'dumpster': return 0.7;
+                case 'crate': return 0.6;
+                case 'bush': return 0.8;
+                case 'vending': return 1.1;
+                default: return 0.5;
+            }
+        }
+
+        /* -------------------------------------------------------------------------- */
+        /*  REMOTE PLAYER VISUAL SYNCHRONIZATION                                     */
+        /* -------------------------------------------------------------------------- */
+        function updateRemotePlayerMesh(pData) {
+            let remote = remotePlayers[pData.uid];
+
+            if (!remote) {
+                const group = new THREE.Group();
+                scene.add(group);
+
+                // Nametag Label
+                const label = document.createElement('div');
+                label.className = 'player-label';
+                label.innerText = pData.name;
+                document.getElementById('nametags-container').appendChild(label);
+
+                remote = { mesh: group, labelEl: label, data: pData, currentDisguise: null };
+                remotePlayers[pData.uid] = remote;
+            }
+
+            remote.data = pData;
+
+            // Handle Disguise Mesh versus Humanoid Mesh rendering for Remote Player
+            if (pData.disguise !== remote.currentDisguise) {
+                remote.currentDisguise = pData.disguise;
+                remote.mesh.clear();
+
+                if (pData.disguise) {
+                    let propGeo;
+                    if (pData.disguise === 'dumpster') propGeo = new THREE.BoxGeometry(2.2, 1.4, 1.4);
+                    else if (pData.disguise === 'crate') propGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+                    else if (pData.disguise === 'bush') propGeo = new THREE.DodecahedronGeometry(1.0);
+                    else propGeo = new THREE.BoxGeometry(1.2, 2.2, 1.0);
+
+                    const propMesh = new THREE.Mesh(propGeo, new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
+                    propMesh.position.y = getPropYOffset(pData.disguise);
+                    remote.mesh.add(propMesh);
+                } else {
+                    const color = pData.role === 'seeker' ? 0x991b1b : 0x2563eb;
+                    createHumanCharacterMesh(remote.mesh, color);
+                }
+            }
+
+            // Lerp Position for smoothness
+            remote.mesh.position.set(pData.x || 0, pData.y || 0, pData.z || 0);
+            remote.mesh.rotation.y = pData.rotationY || 0;
+            remote.mesh.visible = !pData.isCaught;
+            remote.labelEl.style.display = pData.isCaught ? 'none' : 'block';
+        }
+
+        function updateRemoteNametags() {
+            Object.values(remotePlayers).forEach(remote => {
+                if (!remote.mesh.visible) {
+                    remote.labelEl.style.display = 'none';
+                    return;
+                }
+
+                const proj = remote.mesh.position.clone();
+                proj.y += 2.8;
+                proj.project(camera);
+
+                if (proj.z < 1) {
+                    const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = -(proj.y * 0.5 - 0.5) * window.innerHeight;
+                    remote.labelEl.style.left = `${x}px`;
+                    remote.labelEl.style.top = `${y}px`;
+                    remote.labelEl.style.display = 'block';
+                } else {
+                    remote.labelEl.style.display = 'none';
+                }
+            });
+        }
+
+        /* -------------------------------------------------------------------------- */
+        /*  INTERACTION & CONTROLS                                                   */
+        /* -------------------------------------------------------------------------- */
+        function handleInteractAction() {
+            if (gameState === 'LOBBY' || isCaught) return;
+
+            if (myRole === 'hider') {
+                if (playerDisguise) {
+                    playerDisguise = null;
+                    removeLocalDisguiseMesh();
+                    showToast("Form: Human", "fa-user");
+                    audio.playDisguiseSound();
+                    return;
+                }
+
+                // Check proximity to props
+                let nearest = null;
+                let minDist = 3.5;
+                transformableProps.forEach(p => {
+                    const d = player.position.distanceTo(p.mesh.position);
+                    if (d < minDist) {
+                        minDist = d;
+                        nearest = p;
+                    }
+                });
+
+                if (nearest) {
+                    playerDisguise = nearest.type;
+                    applyLocalDisguiseMesh(nearest.type);
+                    showToast(`Disguised as ${nearest.type.toUpperCase()}!`, "fa-mask");
+                    audio.playDisguiseSound();
+                } else {
+                    showToast("No prop nearby to copy!", "fa-triangle-exclamation");
+                }
+            } else if (myRole === 'seeker') {
+                if (scannerEnergy >= 30) {
+                    scannerEnergy -= 30;
+                    audio.playTagRay();
+                    showToast("Scanning for hider signals...", "fa-radar");
+                }
+            }
+        }
+
+        function applyLocalDisguiseMesh(type) {
+            player.children.forEach(c => c.visible = false);
+            let geo;
+            if (type === 'dumpster') geo = new THREE.BoxGeometry(2.2, 1.4, 1.4);
+            else if (type === 'crate') geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+            else if (type === 'bush') geo = new THREE.DodecahedronGeometry(1.0);
+            else geo = new THREE.BoxGeometry(1.2, 2.2, 1.0);
+
+            const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8b5a2b }));
+            mesh.name = 'local_disguise';
+            mesh.position.y = getPropYOffset(type);
+            player.add(mesh);
+            document.getElementById('disguise-text').innerText = `Form: ${type.toUpperCase()}`;
+        }
+
+        function removeLocalDisguiseMesh() {
+            const old = player.getObjectByName('local_disguise');
+            if (old) player.remove(old);
+            player.children.forEach(c => c.visible = true);
+            document.getElementById('disguise-text').innerText = `Form: Human`;
+        }
+
+        function handlePrimaryAction() {
+            if (myRole === 'hider') {
+                audio.playTauntHorn();
+                showToast("TAUNT! Pinged Seekers!", "fa-bullhorn");
+            } else if (myRole === 'seeker' && gameState === 'SEEKING_PHASE') {
+                audio.playTagRay();
+                // Perform Raycast to catch remote players
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+                const remoteMeshes = Object.values(remotePlayers).map(r => r.mesh);
+                const intersects = raycaster.intersectObjects(remoteMeshes, true);
+
+                if (intersects.length > 0) {
+                    const hitMesh = intersects[0].object;
+                    // Find matching remote player
+                    const target = Object.values(remotePlayers).find(r => r.mesh === hitMesh || r.mesh.children.includes(hitMesh));
+                    if (target && !target.data.isCaught && target.data.role === 'hider') {
+                        audio.playCatchSuccess();
+                        showToast(`TAGGED ${target.data.name}!`, "fa-circle-check");
+                        updateDoc(getPlayerDocRef(currentRoomCode, target.data.uid), { isCaught: true });
+                    }
+                }
+            }
+        }
+
+        function setupEventListeners() {
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            window.addEventListener('keydown', (e) => {
+                switch (e.code) {
+                    case 'KeyW': keys.w = true; break;
+                    case 'KeyS': keys.s = true; break;
+                    case 'KeyA': keys.a = true; break;
+                    case 'KeyD': keys.d = true; break;
+                    case 'Space': keys.space = true; break;
+                    case 'ShiftLeft': keys.shift = true; break;
+                    case 'KeyE': handleInteractAction(); break;
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                switch (e.code) {
+                    case 'KeyW': keys.w = false; break;
+                    case 'KeyS': keys.s = false; break;
+                    case 'KeyA': keys.a = false; break;
+                    case 'KeyD': keys.d = false; break;
+                    case 'Space': keys.space = false; break;
+                    case 'ShiftLeft': keys.shift = false; break;
+                }
+            });
+
+            document.getElementById('game-canvas').addEventListener('click', () => {
+                if (gameState !== 'LOBBY') document.body.requestPointerLock();
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                isPointerLocked = (document.pointerLockElement === document.body);
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isPointerLocked) return;
+                mouseLook.yaw -= e.movementX * 0.0025;
+                mouseLook.pitch -= e.movementY * 0.0025;
+                mouseLook.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 3, mouseLook.pitch));
+            });
+
+            window.addEventListener('mousedown', (e) => {
+                if (e.button === 0 && isPointerLocked) handlePrimaryAction();
+            });
+
+            // UI Buttons
+            document.getElementById('btn-create-room').onclick = createRoom;
+            document.getElementById('btn-join-room').onclick = joinRoom;
+            document.getElementById('btn-host-start').onclick = startMatchAsHost;
+            document.getElementById('return-lobby-btn').onclick = () => location.reload();
+            document.getElementById('btn-copy-code').onclick = () => {
+                navigator.clipboard.writeText(currentRoomCode);
+                showToast("Code copied to clipboard!", "fa-copy");
+            };
+        }
+
+        function initMinimap() {
+            const canvas = document.getElementById('minimap-canvas');
+            canvas.width = 180;
+            canvas.height = 180;
+            minimapCtx = canvas.getContext('2d');
+        }
+
+        function updateMinimap() {
+            if (!minimapCtx) return;
+            minimapCtx.clearRect(0, 0, 180, 180);
+            minimapCtx.fillStyle = '#0f172a';
+            minimapCtx.fillRect(0, 0, 180, 180);
+
+            const scale = 1.2;
+            const cx = 90, cy = 90;
+
+            // Draw Buildings
+            minimapCtx.fillStyle = '#334155';
+            cityBuildings.forEach(b => {
+                const rx = cx + (b.minX - player.position.x) * scale;
+                const rz = cy + (b.minZ - player.position.z) * scale;
+                const w = (b.maxX - b.minX) * scale;
+                const h = (b.maxZ - b.minZ) * scale;
+                minimapCtx.fillRect(rx, rz, w, h);
+            });
+
+            // Draw Remote Players
+            Object.values(remotePlayers).forEach(r => {
+                if (r.mesh.visible) {
+                    minimapCtx.fillStyle = r.data.role === 'seeker' ? '#ef4444' : '#06b6d4';
+                    const rx = cx + (r.mesh.position.x - player.position.x) * scale;
+                    const rz = cy + (r.mesh.position.z - player.position.z) * scale;
+                    minimapCtx.beginPath();
+                    minimapCtx.arc(rx, rz, 4, 0, Math.PI * 2);
+                    minimapCtx.fill();
+                }
+            });
+
+            // Local Player Dot
+            minimapCtx.fillStyle = '#facc15';
+            minimapCtx.beginPath();
+            minimapCtx.arc(cx, cy, 5, 0, Math.PI * 2);
+            minimapCtx.fill();
+        }
+
+        /* -------------------------------------------------------------------------- */
+        /*  MAIN LOOP & ANIMATION                                                    */
+        /* -------------------------------------------------------------------------- */
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            if (gameState === 'HIDING_PHASE' || gameState === 'SEEKING_PHASE') {
+                updatePlayerMovement(delta);
+                syncMyPositionToFirebase();
+                updateMinimap();
+                updateRemoteNametags();
+            }
+
+            cameraPivot.position.copy(player.position);
+            cameraPivot.rotation.y = mouseLook.yaw;
+            cameraPivot.children[0].rotation.x = mouseLook.pitch;
+
+            renderer.render(scene, camera);
+        }
+
+        function updatePlayerMovement(delta) {
+            if (isCaught) return;
+
+            let speed = keys.shift ? 11.0 : 6.5;
+            const moveDir = new THREE.Vector3();
+            if (keys.w) moveDir.z -= 1;
+            if (keys.s) moveDir.z += 1;
+            if (keys.a) moveDir.x -= 1;
+            if (keys.d) moveDir.x += 1;
+
+            if (moveDir.lengthSq() > 0) {
+                moveDir.normalize();
+                moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), mouseLook.yaw);
+                player.position.addScaledVector(moveDir, speed * delta);
+                player.rotation.y = mouseLook.yaw;
+                if (Math.random() < 0.08) audio.playFootstep();
+            }
+
+            // World bounds limit
+            const limit = CITY_SIZE * 0.85;
+            player.position.x = Math.max(-limit, Math.min(limit, player.position.x));
+            player.position.z = Math.max(-limit, Math.min(limit, player.position.z));
+        }
+
+        function showToast(msg, iconClass) {
+            const container = document.getElementById('toast-container');
+            document.getElementById('toast-text').innerText = msg;
+            document.getElementById('toast-icon').className = `fa-solid ${iconClass} text-yellow-400`;
+
+            container.classList.remove('opacity-0', '-translate-y-4');
+            container.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                container.classList.remove('opacity-100', 'translate-y-0');
+                container.classList.add('opacity-0', '-translate-y-4');
+            }, 2500);
+        }
+
+        window.onload = async () => {
+            await initAuth();
+            initThreeJS();
+            animate();
+        };
+    </script>
+</body>
+</html>
